@@ -157,6 +157,160 @@ def create_rnn():
     ])
 ```
 
+### Choisir l'optimiseur
+
+Dans `train_model.py`, lors de la compilation du modèle :
+
+```python
+rnn.compile(
+    optimizer='adam',  # Optimiseur par défaut (recommandé)
+    loss="categorical_crossentropy",
+    metrics=['categorical_accuracy']
+)
+```
+
+**Optimiseurs disponibles et cas d'usage :**
+
+| Optimiseur | Utilisation | Avantages | Cas d'usage idéal |
+|------------|-------------|-----------|-------------------|
+| **adam** (défaut) | 90% des cas | Adaptatif, converge rapidement, robuste | NLP, vision, réseaux profonds, analyse de sentiments |
+| **sgd** | Modèles simples | Simple, généralise bien | Fine-tuning, convergence finale précise |
+| **rmsprop** | RNN, LSTM | Bon pour gradients instables | Séries temporelles, problèmes avec gradients variables |
+| **adagrad** | Données éparses | Adapte le learning rate par paramètre | Embeddings de mots, texte avec vocabulaire large |
+| **adamax** | Gradients bruités | Plus stable qu'Adam | Modèles avec beaucoup de bruit |
+| **nadam** | Convergence rapide | Adam + momentum Nesterov | Alternative à Adam pour convergence plus rapide |
+| **adadelta** | Sans hyperparamètres | Pas besoin de learning rate | Prototypage rapide |
+
+**Configuration avancée (optionnel) :**
+
+```python
+from keras.optimizers import Adam
+
+# Personnaliser l'optimiseur
+optimizer = Adam(
+    learning_rate=0.001,  # Taux d'apprentissage
+    beta_1=0.9,          # Momentum exponentiel pour le gradient
+    beta_2=0.999         # Momentum exponentiel pour le carré du gradient
+)
+
+rnn.compile(
+    optimizer=optimizer,
+    loss="categorical_crossentropy",
+    metrics=['categorical_accuracy']
+)
+```
+
+**Recommandations pour votre cas (analyse de sentiments) :**
+- ✅ **Adam** : Excellent choix par défaut, fonctionne très bien pour l'analyse de sentiments
+- **Alternative 1** : **Nadam** si la convergence est lente
+- **Alternative 2** : **RMSprop** si vous observez des instabilités pendant l'entraînement
+- **Alternative 3** : **SGD avec momentum** pour un fine-tuning final après Adam
+
+💡 **Conseil** : Commencez toujours avec Adam. Changez d'optimiseur uniquement si vous rencontrez des problèmes spécifiques de convergence ou de performance.
+
+### Choisir la fonction de perte
+
+Dans `train_model.py`, lors de la compilation du modèle :
+
+```python
+rnn.compile(
+    optimizer='adam',
+    loss="categorical_crossentropy",  # Fonction de perte par défaut pour multi-classes
+    metrics=['categorical_accuracy']
+)
+```
+
+**Fonctions de perte disponibles et cas d'usage :**
+
+#### Pour la classification
+
+| Fonction de perte | Cas d'usage | Activation finale | Exemple d'utilisation |
+|------------------|-------------|-------------------|----------------------|
+| **categorical_crossentropy** (défaut) | Classification multi-classes avec one-hot encoding | softmax | Sentiments (positif/neutre/négatif), catégories de films |
+| **sparse_categorical_crossentropy** | Classification multi-classes avec labels entiers | softmax | Même cas mais labels [0,1,2] au lieu de [[1,0,0],[0,1,0],[0,0,1]] |
+| **binary_crossentropy** | Classification binaire ou multi-label | sigmoid | Bon/mauvais film, tags multiples (action ET comédie) |
+| **focal_crossentropy** | Classification avec classes déséquilibrées | softmax/sigmoid | Dataset avec 90% positifs, 10% négatifs |
+
+#### Pour la régression (si vous prédisez des scores)
+
+| Fonction de perte | Cas d'usage | Activation finale | Exemple d'utilisation |
+|------------------|-------------|-------------------|----------------------|
+| **mean_squared_error** (MSE) | Prédiction de valeurs continues | linear/None | Note de 0 à 10, score de sentiment 0-100% |
+| **mean_absolute_error** (MAE) | Régression robuste aux outliers | linear/None | Scores avec données bruitées |
+| **huber** | Hybride MSE/MAE | linear/None | Robuste mais différentiable |
+| **mean_squared_logarithmic_error** | Valeurs avec large échelle | linear/None | Prédictions où l'erreur relative compte plus |
+
+#### Pour des cas spécialisés
+
+| Fonction de perte | Cas d'usage | Activation finale | Exemple d'utilisation |
+|------------------|-------------|-------------------|----------------------|
+| **cosine_similarity** | Similarité entre vecteurs | None | Comparaison d'embeddings de commentaires |
+| **kullback_leibler_divergence** | Divergence entre distributions | softmax | Modèles génératifs, autoencoders |
+| **poisson** | Comptage d'événements | exponential | Nombre de likes, vues |
+
+**Configuration pour votre cas (analyse de sentiments 3 classes) :**
+
+```python
+# Option 1 : One-hot encoding (votre configuration actuelle) ✅
+# Labels : [[1,0,0], [0,1,0], [0,0,1]]
+rnn.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',  # Parfait pour votre cas
+    metrics=['categorical_accuracy']
+)
+
+# Option 2 : Labels entiers (plus économe en mémoire)
+# Labels : [0, 1, 2]
+rnn.compile(
+    optimizer='adam',
+    loss='sparse_categorical_crossentropy',
+    metrics=['sparse_categorical_accuracy']
+)
+
+# Option 3 : Si vous aviez des classes déséquilibrées
+from tensorflow.keras.losses import CategoricalFocalCrossentropy
+rnn.compile(
+    optimizer='adam',
+    loss=CategoricalFocalCrossentropy(alpha=0.25, gamma=2.0),
+    metrics=['categorical_accuracy']
+)
+```
+
+**Fonction de perte personnalisée (avancé) :**
+
+```python
+import tensorflow as tf
+
+def custom_weighted_loss(y_true, y_pred):
+    """Perte personnalisée avec poids différents par classe"""
+    # Poids : négatif=2, neutre=1, positif=1.5
+    weights = tf.constant([2.0, 1.0, 1.5])
+    
+    # Categorical crossentropy pondérée
+    cce = tf.keras.losses.CategoricalCrossentropy()
+    base_loss = cce(y_true, y_pred)
+    
+    # Appliquer les poids selon la vraie classe
+    class_weights = tf.reduce_sum(y_true * weights, axis=-1)
+    weighted_loss = base_loss * class_weights
+    
+    return tf.reduce_mean(weighted_loss)
+
+rnn.compile(
+    optimizer='adam',
+    loss=custom_weighted_loss,
+    metrics=['categorical_accuracy']
+)
+```
+
+**Recommandations pour votre projet :**
+- ✅ **categorical_crossentropy** : Excellent choix pour 3 classes équilibrées
+- **Alternative 1** : **sparse_categorical_crossentropy** si vous voulez économiser de la mémoire
+- **Alternative 2** : **focal_crossentropy** si vos classes sont très déséquilibrées
+- **Alternative 3** : Fonction personnalisée si certains sentiments sont plus importants à détecter
+
+💡 **Conseil** : La fonction de perte doit correspondre à votre problème ET à votre activation finale. Pour la classification multi-classes, utilisez toujours softmax + categorical_crossentropy (ou sa variante sparse).
+
 ### Ajuster les hyperparamètres d'entraînement
 
 Dans `train_model.py`, fonction `main()` :
